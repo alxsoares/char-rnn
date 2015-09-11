@@ -77,8 +77,23 @@ function CharSplitLMMinibatchLoader.create(data_dir, batch_size, seq_length, spl
     print("HELLO")
     local ivocab = {}
     for c,i in pairs(self.vocab_mapping) do ivocab[i] = c end
-    print(ivocab[self.x_batches[1][1][self.seq_length]])
-    print(ivocab[self.x_batches[2][1][self.seq_length]])
+    print(1,1)
+    for i=1,100 do io.write(ivocab[self.x_batches[1][1][i]]) end
+    print(1,2)
+    io.flush()
+    for i=1,100 do io.write(ivocab[self.x_batches[1][2][i]]) end
+    print(2,1)
+    io.flush()
+    for i=1,100 do io.write(ivocab[self.x_batches[2][1][i]]) end
+    io.flush()
+    --print(ivocab[self.x_batches[1][1][2]])
+    --print(ivocab[self.x_batches[1][1][2]])
+    --print(ivocab[self.x_batches[1][1][2]])
+    --print(ivocab[self.x_batches[1][1][2]])
+    --print(ivocab[self.x_batches[1][2][1]])
+    --print(ivocab[self.x_batches[1][2][2]])
+    --print(ivocab[self.x_batches[2][2][self.seq_length]])
+    --print(ivocab[self.x_batches[2][2][self.seq_length]])
 
     -- lets try to be helpful here
     if self.nbatches < 50 then
@@ -141,7 +156,7 @@ function CharSplitLMMinibatchLoader.text_to_tensor(in_textfile, out_vocabfile, o
     local f = torch.DiskFile(in_textfile)
     local rawdata = f:readString('*a') -- NOTE: this reads the whole file at once
     print("rawdata length",#rawdata)
-    rawdata = string.gsub(rawdata, "n", "") --remove line breaks
+    rawdata = string.gsub(rawdata, "\n", "") --remove line breaks
     print("rawdata length",#rawdata)
     f:close()
 
