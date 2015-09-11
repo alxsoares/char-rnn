@@ -3,6 +3,9 @@
 The difference between this and train.lua is (at least at first)
 ignoring newlines in the input file
 
+Also, do not train on the last character, because there's no label
+character after it
+
 
 This file trains a character-level multi-layer RNN on text data
 
@@ -171,7 +174,7 @@ function eval_split(split_index, max_batches)
             y = y:float():cuda()
         end
         -- forward pass
-        for t=1,opt.seq_length do
+        for t=1,(opt.seq_length-1) do
             clones.rnn[t]:evaluate() -- for dropout proper functioning
             local lst = clones.rnn[t]:forward{x[{{}, t}], unpack(rnn_state[t-1])}
             rnn_state[t] = {}
