@@ -26,8 +26,8 @@ cmd:text('Options')
 cmd:argument('-model','model checkpoint to use for sampling')
 -- optional parameters
 cmd:option('-gpuid',0,'which gpu to use. -1 = use CPU')
-cmd:option('-primetext',"",'used as a prompt to "seed" the state of the LSTM using a given sequence, before we sample.')
-cmd:option('-verbose',1,'set to 0 to ONLY print the sampled text, no diagnostics')
+cmd:option('-primetextfile',"",'file with the lines to score')
+cmd:option('-verbose',0,'set to 0 to ONLY print the sampled text, no diagnostics')
 cmd:text()
 
 -- parse input params
@@ -80,29 +80,35 @@ for L = 1,checkpoint.opt.num_layers do
 end
 state_size = #current_state
 
--- do a few seeded timesteps
-local seed_text = opt.primetext
--- start with uniform probabilities
-prediction = torch.log(torch.Tensor(1, #ivocab):fill(1)/(#ivocab))
-if opt.gpuid >= 0 then prediction = prediction:cuda() end
-totalLogProb = 0
-if string.len(seed_text) > 0 then
-    gprint('seeding with ' .. seed_text)
-    gprint('--------------------------')
-    for c in seed_text:gmatch'.' do
-        prev_char = torch.Tensor{vocab[c]}
-        prev_char_prob = prediction[1][vocab[c]]
-        totalLogProb = totalLogProb + prev_char_prob
-        --io.write(ivocab[prev_char[1]])
-        if opt.gpuid >= 0 then prev_char = prev_char:cuda() end
-        local lst = protos.rnn:forward{prev_char, unpack(current_state)}
-        -- lst is a list of [state1,state2,..stateN,output]. We want everything but last piece
-        current_state = {}
-        for i=1,state_size do table.insert(current_state, lst[i]) end
-        prediction = lst[#lst] -- last element holds the log probabilities
+
+local f = io.open(opt.primetextfile, 'r')
+while true do
+    local seed_text = f:read("*line")
+    if seed_text==nil then break end
+    -- start with uniform probabilities
+    prediction = torch.log(torch.Tensor(1, #ivocab):fill(1)/(#ivocab))
+    if opt.gpuid >= 0 then prediction = prediction:cuda() end
+    totalLogProb = 0
+    if string.len(seed_text) > 0 then
+        gprint('seeding with ' .. seed_text)
+        gprint('--------------------------')
+        for c in seed_text:gmatch'.' do
+            prev_char = torch.Tensor{vocab[c]}
+            prev_char_prob = prediction[1][vocab[c]]
+            totalLogProb = totalLogProb + prev_char_prob
+            --io.write(ivocab[prev_char[1]])
+            if opt.gpuid >= 0 then prev_char = prev_char:cuda() end
+            local lst = protos.rnn:forward{prev_char, unpack(current_state)}
+            -- lst is a list of [state1,state2,..stateN,output]. We want everything but last piece
+            current_state = {}
+            for i=1,state_size do table.insert(current_state, lst[i]) end
+            prediction = lst[#lst] -- last element holds the log probabilities
+        end
     end
+
+    --print("log prob",totalLogProb)
+    io.write(totalLogProb);
+    io.write('\n');
+    io.flush();
+    --io.write('\n') io.flush()
 end
-
-print("log prob",totalLogProb)
---io.write('\n') io.flush()
-
