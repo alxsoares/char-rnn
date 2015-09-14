@@ -24,6 +24,8 @@ require 'util.misc'
 local CharSplitLMMinibatchLoader = require 'util.CharSplitLMMinibatchLoader'
 local model_utils = require 'util.model_utils'
 local LSTM = require 'model.LSTM'
+local GRU = require 'model.GRU'
+local RNN = require 'model.RNN'
 
 cmd = torch.CmdLine()
 cmd:text()
@@ -35,7 +37,7 @@ cmd:option('-data_dir','data/tinyshakespeare','data directory. Should contain th
 -- model params
 cmd:option('-rnn_size', 128, 'size of LSTM internal state')
 cmd:option('-num_layers', 2, 'number of layers in the LSTM')
-cmd:option('-model', 'lstm', 'for now only lstm is supported. keep fixed')
+cmd:option('-model', 'lstm', 'lstm,gru or rnn')
 -- optimization
 cmd:option('-learning_rate',2e-3,'learning rate')
 cmd:option('-learning_rate_decay',0.97,'learning rate decay')
@@ -58,6 +60,7 @@ cmd:option('-checkpoint_dir', 'cv', 'output directory where checkpoints get writ
 cmd:option('-savefile','lstm','filename to autosave the checkpont to. Will be inside checkpoint_dir/')
 -- GPU/CPU
 cmd:option('-gpuid',0,'which gpu to use. -1 = use CPU')
+cmd:option('-opencl',0,'use OpenCL (instead of CUDA)')
 cmd:text()
 
 -- parse input params
@@ -68,7 +71,7 @@ local test_frac = math.max(0, 1 - (opt.train_frac + opt.val_frac))
 local split_sizes = {opt.train_frac, opt.val_frac, test_frac} 
 
 -- initialize cunn/cutorch for training on the GPU and fall back to CPU gracefully
-if opt.gpuid >= 0 then
+if opt.gpuid >= 0 and opt.opencl == 0 then
     local ok, cunn = pcall(require, 'cunn')
     local ok2, cutorch = pcall(require, 'cutorch')
     if not ok then print('package cunn not found!') end
@@ -80,6 +83,24 @@ if opt.gpuid >= 0 then
     else
         print('If cutorch and cunn are installed, your CUDA toolkit may be improperly configured.')
         print('Check your CUDA toolkit installation, rebuild cutorch and cunn, and try again.')
+        print('Falling back on CPU mode')
+        opt.gpuid = -1 -- overwrite user setting
+    end
+end
+
+-- initialize clnn/cltorch for training on the GPU and fall back to CPU gracefully
+if opt.gpuid >= 0 and opt.opencl == 1 then
+    local ok, cunn = pcall(require, 'clnn')
+    local ok2, cutorch = pcall(require, 'cltorch')
+    if not ok then print('package clnn not found!') end
+    if not ok2 then print('package cltorch not found!') end
+    if ok and ok2 then
+        print('using OpenCL on GPU ' .. opt.gpuid .. '...')
+        cltorch.setDevice(opt.gpuid + 1) -- note +1 to make it 0 indexed! sigh lua
+        torch.manualSeed(opt.seed)
+    else
+        print('If cltorch and clnn are installed, your OpenCL driver may be improperly configured.')
+        print('Check your OpenCL driver installation, check output of clinfo command, and try again.')
         print('Falling back on CPU mode')
         opt.gpuid = -1 -- overwrite user setting
     end
@@ -113,9 +134,15 @@ if string.len(opt.init_from) > 0 then
     opt.num_layers = checkpoint.opt.num_layers
     do_random_init = false
 else
-    print('creating an LSTM with ' .. opt.num_layers .. ' layers')
+    print('creating an ' .. opt.model .. ' with ' .. opt.num_layers .. ' layers')
     protos = {}
-    protos.rnn = LSTM.lstm(vocab_size, opt.rnn_size, opt.num_layers, opt.dropout)
+    if opt.model == 'lstm' then
+        protos.rnn = LSTM.lstm(vocab_size, opt.rnn_size, opt.num_layers, opt.dropout)
+    elseif opt.model == 'gru' then
+        protos.rnn = GRU.gru(vocab_size, opt.rnn_size, opt.num_layers, opt.dropout)
+    elseif opt.model == 'rnn' then
+        protos.rnn = RNN.rnn(vocab_size, opt.rnn_size, opt.num_layers, opt.dropout)
+    end
     protos.criterion = nn.ClassNLLCriterion()
 end
 
@@ -123,14 +150,20 @@ end
 init_state = {}
 for L=1,opt.num_layers do
     local h_init = torch.zeros(opt.batch_size, opt.rnn_size)
-    if opt.gpuid >=0 then h_init = h_init:cuda() end
+    if opt.gpuid >=0 and opt.opencl == 0 then h_init = h_init:cuda() end
+    if opt.gpuid >=0 and opt.opencl == 1 then h_init = h_init:cl() end
     table.insert(init_state, h_init:clone())
-    table.insert(init_state, h_init:clone())
+    if opt.model == 'lstm' then
+        table.insert(init_state, h_init:clone())
+    end
 end
 
 -- ship the model to the GPU if desired
-if opt.gpuid >= 0 then
+if opt.gpuid >= 0 and opt.opencl == 0 then
     for k,v in pairs(protos) do v:cuda() end
+end
+if opt.gpuid >= 0 and opt.opencl == 1 then
+    for k,v in pairs(protos) do v:cl() end
 end
 
 -- put the above things into one flattened parameters tensor
@@ -162,10 +195,14 @@ function eval_split(split_index, max_batches)
     for i = 1,n do -- iterate over batches in the split
         -- fetch a batch
         local x, y = loader:next_batch(split_index)
-        if opt.gpuid >= 0 then -- ship the input arrays to GPU
+        if opt.gpuid >= 0 and opt.opencl == 0 then -- ship the input arrays to GPU
             -- have to convert to float because integers can't be cuda()'d
             x = x:float():cuda()
             y = y:float():cuda()
+        end
+        if opt.gpuid >= 0 and opt.opencl == 1 then -- ship the input arrays to GPU
+            x = x:cl()
+            y = y:cl()
         end
         -- forward pass
         for t=1,opt.seq_length do
@@ -195,10 +232,14 @@ function feval(x)
 
     ------------------ get minibatch -------------------
     local x, y = loader:next_batch(1)
-    if opt.gpuid >= 0 then -- ship the input arrays to GPU
+    if opt.gpuid >= 0 and opt.opencl == 0 then -- ship the input arrays to GPU
         -- have to convert to float because integers can't be cuda()'d
         x = x:float():cuda()
         y = y:float():cuda()
+    end
+    if opt.gpuid >= 0 and opt.opencl == 1 then -- ship the input arrays to GPU
+        x = x:cl()
+        y = y:cl()
     end
     ------------------- forward pass -------------------
     local rnn_state = {[0] = init_state_global}
@@ -291,6 +332,10 @@ for i = 1, iterations do
     if i % 10 == 0 then collectgarbage() end
 
     -- handle early stopping if things are going really bad
+    if loss[1] ~= loss[1] then
+        print('loss is NaN.  This usually indicates a bug.  Please check the issues page for existing issues, or create a new issue, if none exist.  Ideally, please state: your operating system, 32-bit/64-bit, your blas version, cpu/cuda/cl?')
+        break -- halt
+    end
     if loss0 == nil then loss0 = loss[1] end
     if loss[1] > loss0 * 3 then
         print('loss is exploding, aborting.')

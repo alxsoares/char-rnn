@@ -5,23 +5,34 @@ This code implements **multi-layer Recurrent Neural Network** (RNN, LSTM, and GR
 
 The context of this code base is described in detail in my [blog post](http://karpathy.github.io/2015/05/21/rnn-effectiveness/). The [project page](http://cs.stanford.edu/people/karpathy/char-rnn/) that has a few pointers to some datasets.
 
+
+If you are new to Torch/Lua/Neural Nets, it might be helpful to know that this code is really just a slightly more fancy version of this [100-line gist](https://gist.github.com/karpathy/d4dee566867f8291f086) that I wrote in Python/numpy. The code in this repo additionally allows for multiple layers, uses an LSTM instead of an RNN, has more supporting code for model checkpointing, and is of course much more efficient.
+
 This code was originally based on Oxford University Machine Learning class [practical 6](https://github.com/oxford-cs-ml-2015/practical6), which is in turn based on [learning to execute](https://github.com/wojciechz/learning_to_execute) code from Wojciech Zaremba. Chunks of it were also developed in collaboration with my labmate [Justin Johnson](https://github.com/jcjohnson/).
 
 ## Requirements
 
 This code is written in Lua and requires [Torch](http://torch.ch/).
-Additionally, you need to install the `nngraph` and `optim` packages using [LuaRocks](https://luarocks.org/) which you will be able to do after installing Torch:
+Additionally, you need to install the `nngraph`, `nn` and `optim` packages using [LuaRocks](https://luarocks.org/) which you will be able to do after installing Torch:
 
 ```bash
 $ luarocks install nngraph 
 $ luarocks install optim
+$ luarocks install nn
 ```
 
-If you'd like to use GPU computing, you'll first need to install the [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit), then the `cutorch` and `cunn` packages:
+If you'd like to use CUDA GPU computing, you'll first need to install the [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit), then the `cutorch` and `cunn` packages:
 
 ```bash
 $ luarocks install cutorch
 $ luarocks install cunn
+```
+
+If you'd like to use OpenCL GPU computing, you'll first need to install the `cltorch` and `clnn` packages, and then use the option `-opencl 1` during training ([cltorch issues](https://github.com/hughperkins/cltorch/issues)):
+
+```bash
+$ luarocks install cltorch
+$ luarocks install clnn
 ```
 
 ## Usage
@@ -71,6 +82,14 @@ Make sure that if your checkpoint was trained with GPU it is also sampled from w
 **Temperature**. An important parameter you may want to play with a lot is `-temperature`, which takes a number in range \[0, 1\] (notice 0 not included), default = 1. The temperature is dividing the predicted log probabilities before the Softmax, so lower temperature will cause the model to make more likely, but also more boring and conservative predictions. Higher temperatures cause the model to take more chances and increase diversity of results, but at a cost of more mistakes.
 
 **Priming**. It's also possible to prime the model with some starting text using `-primetext`. This starts out the RNN with some hardcoded characters to *warm* it up with some context before it starts generating text.
+
+**Training with GPU but sampling on CPU**. Right now the solution is to use the `convert_gpu_cpu_checkpoint.lua` script to convert your GPU checkpoint to a CPU checkpoint. In near future you will not have to do this explicitly. E.g.:
+
+```
+$ th convert_gpu_cpu_checkpoint.lua cv/lm_lstm_epoch30.00_1.3950.t7
+```
+
+will create a new file `cv/lm_lstm_epoch30.00_1.3950.t7_cpu.t7` that you can use with the sample script and with `-gpuid -1` for CPU mode.
 
 Happy sampling!
 
