@@ -1,0 +1,1 @@
+th train_genomicInputs.lua -data_dir data/CrossCellTypeCTCF/train_neg/ -rnn_size 512 -seq_length 800 -checkpoint_dir data/CrossCellTypeCTCF/train_neg/cv/ -savefile 150K_lstm_rnnSize512_seqLength800 -batch_size 10 -eval_val_every 250 -inifsdf
